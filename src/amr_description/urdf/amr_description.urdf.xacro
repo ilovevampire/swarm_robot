@@ -1,0 +1,285 @@
+<?xml version="1.0"?>
+<!--
+  amr_description.urdf.xacro
+  ===========================
+  Pure kinematic/visual/collision/inertial robot description.
+  NO Gazebo plugin tags, NO sensor blocks, NO ros2_control here - those
+  live in amr_gazebo.xacro. This split means robot_state_publisher on
+  REAL hardware only ever needs to load THIS file.
+
+  FRAME CONVENTIONS (this is what keeps TF from breaking):
+  REP-103: +x = forward, +y = left, +z = up
+  REP-105: base_footprint -> base_link -> everything else
+    - base_footprint: virtual, massless, sits exactly on the ground (z=0)
+    - base_link: the chassis frame, sits wheel_radius metres above
+      base_footprint, so the wheel bottoms land exactly on z=0
+
+  WHEEL LAYOUT: 4 wheels total - REAR pair is differential-drive
+  (motorised), FRONT pair is free-rolling (continuous joint, no
+  actuator, no ros2_control entry) - like a shopping cart's front
+  wheels, giving 4 ground contacts instead of a caster's single point.
+-->
+<robot name="amr" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ===========================================================
+       PROPERTIES - every dimension lives here ONCE. Change a
+       number here and the whole robot updates consistently -
+       never hard-code a dimension twice elsewhere in the file.
+       =========================================================== -->
+
+  <!-- Chassis (simple box) -->
+  <xacro:property name="chassis_length" value="0.40"/>   <!-- x: front-back -->
+  <xacro:property name="chassis_width"  value="0.32"/>   <!-- y: left-right -->
+  <xacro:property name="chassis_height" value="0.16"/>   <!-- z: up-down -->
+  <xacro:property name="chassis_mass"   value="5.0"/>    <!-- kg -->
+
+  <!-- Wheels (all four share the same geometry) -->
+  <xacro:property name="wheel_radius" value="0.08"/>
+  <xacro:property name="wheel_width"  value="0.03"/>
+  <xacro:property name="wheel_mass"   value="0.3"/>      <!-- kg, each -->
+  <xacro:property name="wheel_ygap"   value="0.004"/>    <!-- chassis side -> wheel inner face gap -->
+  <xacro:property name="wheel_zoff" value="0.03"/>
+
+  <!-- Derived - don't edit, this is computed from the numbers above -->
+  <xacro:property name="wheel_center_y"
+                   value="${chassis_width/2 + wheel_ygap + wheel_width/2}"/>
+
+  <!-- Wheelbase - distance from chassis centre to EACH axle (both
+       front and rear), along x. Rear axle = driven, front = passive. -->
+  <xacro:property name="wheel_axle_xoff" value="0.15"/>
+
+  <!-- Sensor mount helpers -->
+  <xacro:property name="lidar_radius" value="0.03"/>
+  <xacro:property name="lidar_height" value="0.04"/>
+  <xacro:property name="lidar_stand_height" value="0.02"/>
+
+  <xacro:property name="pi_const" value="3.14159265359"/>
+
+  <!-- ===========================================================
+       MATERIALS - pure visual, RViz-only colours
+       =========================================================== -->
+  <material name="chassis_grey"><color rgba="0.25 0.27 0.30 1.0"/></material>
+  <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material>
+  <material name="sensor_dark"><color rgba="0.1 0.1 0.1 1.0"/></material>
+  <material name="led_off"><color rgba="0.6 0.6 0.6 0.6"/></material>
+
+  <!-- ===========================================================
+       BASE FOOTPRINT (REP-105 ground-projection frame, massless)
+       =========================================================== -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <!-- This single number lifts the whole robot so the wheels land
+         exactly on the ground plane. -->
+    <origin xyz="0 0 ${wheel_radius + wheel_zoff}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===========================================================
+       BASE LINK (chassis) - simple box
+       =========================================================== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+      <material name="chassis_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${chassis_mass}"/>
+      <!-- Solid-box inertia formula, computed automatically from the
+           dimensions above - change chassis_* and this stays correct. -->
+      <inertia
+        ixx="${(1/12)*chassis_mass*(chassis_width*chassis_width + chassis_height*chassis_height)}"
+        iyy="${(1/12)*chassis_mass*(chassis_length*chassis_length + chassis_height*chassis_height)}"
+        izz="${(1/12)*chassis_mass*(chassis_length*chassis_length + chassis_width*chassis_width)}"
+        ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ===========================================================
+       WHEEL MACRO - ONE macro builds all four wheels (rear-left,
+       rear-right, front-left, front-right). Only the REAR pair is
+       motorised - it gets added to <ros2_control> in
+       amr_gazebo.xacro. The FRONT pair are plain `continuous`
+       joints with NO actuator entry anywhere - Gazebo's physics
+       engine just lets them spin freely from rolling contact,
+       same as a shopping cart's front wheels.
+
+       Building all four from ONE macro (instead of writing each
+       wheel by hand) is what prevents wheel-TF mismatches: front/
+       rear and left/right are just sign flips on one formula,
+       never hand-typed four separate times.
+       =========================================================== -->
+  <xacro:macro name="amr_wheel" params="name x_pos y_pos">
+    <link name="${name}_wheel_link">
+      <visual>
+        <!-- Rotate cylinder's native Z-axis to align with robot Y
+             (REP-103: y=left) - must match the joint axis below. -->
+        <origin xyz="0 0 0" rpy="${pi_const/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <material name="wheel_black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi_const/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0" rpy="${pi_const/2} 0 0"/>
+        <mass value="${wheel_mass}"/>
+        <inertia
+          ixx="${(1/12)*wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+          iyy="${(1/12)*wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+          izz="${0.5*wheel_mass*wheel_radius*wheel_radius}"
+          ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+
+    <joint name="${name}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${name}_wheel_link"/>
+      <origin xyz="${x_pos} ${y_pos} ${-wheel_zoff}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="20" velocity="10"/>
+      <dynamics damping="0.1" friction="0.0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- REAR pair - DRIVEN (differential drive, wired up in amr_gazebo.xacro) -->
+  <xacro:amr_wheel name="rear_left"   x_pos="${-wheel_axle_xoff}" y_pos="${wheel_center_y}"/>
+  <xacro:amr_wheel name="rear_right"  x_pos="${-wheel_axle_xoff}" y_pos="${-wheel_center_y}"/>
+
+  <!-- FRONT pair - PASSIVE/free-rolling, no motor, not in ros2_control -->
+  <xacro:amr_wheel name="front_left"  x_pos="${wheel_axle_xoff}"  y_pos="${wheel_center_y}"/>
+  <xacro:amr_wheel name="front_right" x_pos="${wheel_axle_xoff}"  y_pos="${-wheel_center_y}"/>
+
+  <!-- ===========================================================
+       SENSOR MOUNT LINKS
+       Only geometry/placement here. The actual <sensor> blocks
+       that make these links "do" anything live in amr_gazebo.xacro,
+       referencing these link names via <gazebo reference="...">.
+       =========================================================== -->
+
+  <!-- 2D LIDAR - top-centre, on a small stand -->
+  <link name="lidar_link">
+    <visual>
+      <geometry><cylinder radius="${lidar_radius}" length="${lidar_height}"/></geometry>
+      <material name="sensor_dark"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${lidar_radius}" length="${lidar_height}"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.15"/>
+      <inertia ixx="0.0001" iyy="0.0001" izz="0.0001" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="lidar_link"/>
+    <origin xyz="0 0 ${chassis_height/2 + lidar_stand_height}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- IMU - chassis centre (cleanest for orientation math) -->
+  <link name="imu_link">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- CAMERA - front face, upper-middle height -->
+  <link name="camera_link">
+    <visual>
+      <geometry><box size="0.02 0.05 0.03"/></geometry>
+      <material name="sensor_dark"/>
+    </visual>
+    <collision>
+      <geometry><box size="0.02 0.05 0.03"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="1e-5" iyy="1e-5" izz="1e-5" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="camera_link"/>
+    <origin xyz="${chassis_length/2} 0 ${chassis_height/4}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Camera OPTICAL frame - image-processing convention (z-forward,
+       x-right, y-down) differs from REP-103. Skipping this child
+       frame is a very common cause of "my image/depth looks
+       sideways or upside-down" bugs. -->
+  <link name="camera_optical_link"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child  link="camera_optical_link"/>
+    <origin xyz="0 0 0" rpy="${-pi_const/2} 0 ${-pi_const/2}"/>
+  </joint>
+
+  <!-- ULTRASONIC RING - 3x across the front face -->
+  <xacro:macro name="ultrasonic" params="name y_pos">
+    <link name="${name}_link">
+      <visual>
+        <geometry><box size="0.01 0.02 0.02"/></geometry>
+        <material name="sensor_dark"/>
+      </visual>
+      <collision>
+        <geometry><box size="0.01 0.02 0.02"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="0.01"/>
+        <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+    <joint name="${name}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${name}_link"/>
+      <origin xyz="${chassis_length/2} ${y_pos} ${-chassis_height/2 + 0.02}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:ultrasonic name="ultrasonic_front_left"   y_pos="${chassis_width/3}"/>
+  <xacro:ultrasonic name="ultrasonic_front_center" y_pos="0"/>
+  <xacro:ultrasonic name="ultrasonic_front_right"  y_pos="${-chassis_width/3}"/>
+
+  <!-- LED STATUS STRIP - purely aesthetic geometry. The actual
+       point-light that gets driven idle/nav/charging/error colours
+       is declared in amr_gazebo.xacro, attached to THIS link. -->
+  <link name="led_strip_link">
+    <visual>
+      <geometry><box size="0.03 ${chassis_width*0.8} 0.01"/></geometry>
+      <material name="led_off"/>
+    </visual>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <joint name="led_strip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="led_strip_link"/>
+    <origin xyz="${-chassis_length/2 + 0.01} 0 ${chassis_height/2}" rpy="0 0 0"/>
+  </joint>
+
+</robot>

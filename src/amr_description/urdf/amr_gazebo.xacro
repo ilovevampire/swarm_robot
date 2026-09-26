@@ -1,0 +1,218 @@
+<?xml version="1.0"?>
+<!--
+  amr_gazebo.xacro
+  =================
+  Everything Gazebo/gz-sim-specific: sensor <sensor> blocks, the
+  ros2_control hardware interface + its gz_ros2_control plugin, and the
+  LED status light. xacro:include-d by amr.urdf.xacro AFTER
+  amr_description.urdf.xacro, so every <gazebo reference="..."> below
+  points at a link that already exists.
+
+  WHEEL NOTE: only rear_left_wheel_joint / rear_right_wheel_joint appear
+  under <ros2_control> further down. front_left/front_right are plain
+  continuous joints with NO entry here - controller_manager never sends
+  them commands, so they just spin freely from contact with the ground,
+  same as amr_description.urdf.xacro built them. One real trade-off worth
+  knowing: because these front wheels are fixed-axis (not a swiveling
+  caster), they'll scrub sideways a little during sharp turns instead of
+  pivoting freely - fine for a warehouse-speed AMR, just not physically
+  identical to a real shopping-cart caster.
+
+  Requires (ROS2 Jazzy + Gazebo Harmonic):
+    sudo apt install ros-jazzy-ros-gz ros-jazzy-gz-ros2-control \
+                      ros-jazzy-ros2-controllers ros-jazzy-joint-state-broadcaster
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ===========================================================
+       2D LIDAR (gpu_lidar) - used for SLAM/AMCL/Nav2 costmaps
+       =========================================================== -->
+  <gazebo reference="lidar_link">
+    <sensor name="lidar_sensor" type="gpu_lidar">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <topic>scan</topic>
+      <gz_frame_id>lidar_link</gz_frame_id>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.14159</min_angle>
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.12</min>
+          <max>12.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </lidar>
+    </sensor>
+  </gazebo>
+
+  <!-- ===========================================================
+       IMU - needs the world-level gz-sim-imu-system plugin (see
+       worlds/warehouse.sdf) to actually publish.
+       =========================================================== -->
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <topic>imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+  <!-- ===========================================================
+       CAMERA - physically mounted on camera_link, but published
+       image frame_id is camera_optical_link (see the description
+       file's comment on why that frame exists).
+       =========================================================== -->
+  <gazebo reference="camera_link">
+    <sensor name="camera_sensor" type="camera">
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <visualize>true</visualize>
+      <topic>camera/image_raw</topic>
+      <gz_frame_id>camera_optical_link</gz_frame_id>
+      <camera>
+        <horizontal_fov>1.396</horizontal_fov> <!-- ~80 deg -->
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.05</near>
+          <far>15.0</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+
+  <!-- ===========================================================
+       ULTRASONIC RING (x3)
+       gz-sim's SONAR sensor type has patchy support across
+       releases, so these are single-ray, narrow-FOV gpu_lidar
+       sensors instead - a reliable, well-documented way to
+       emulate a short-range ultrasonic/IR range finder in sim.
+       =========================================================== -->
+  <xacro:macro name="ultrasonic_sensor" params="name">
+    <gazebo reference="${name}_link">
+      <sensor name="${name}_sensor" type="gpu_lidar">
+        <always_on>true</always_on>
+        <update_rate>20</update_rate>
+        <topic>${name}</topic>
+        <gz_frame_id>${name}_link</gz_frame_id>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.02</min>
+            <max>4.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:ultrasonic_sensor name="ultrasonic_front_left"/>
+  <xacro:ultrasonic_sensor name="ultrasonic_front_center"/>
+  <xacro:ultrasonic_sensor name="ultrasonic_front_right"/>
+
+    <!-- ===========================================================
+       LED STATUS LIGHT
+       A single point light attached to led_strip_link. Its colour
+       is changed at runtime by scripts/led_state_controller.py,
+       which calls Gazebo's built-in `/world/<world_name>/
+       light_config` service - no custom C++ plugin needed. Starts
+       "off" (dim grey/white).
+
+       VERIFY WHEN YOU GET TO THE RUN STEP: because this light is
+       attached to a link rather than declared directly under
+       <world>, model-attached light naming has differed slightly
+       across gz-sim releases. If colours never change once we
+       write the controller script: open Gazebo's View > Lights
+       panel while the sim is running and check the exact
+       registered name - it should be "led_light"; if it's
+       something else, we'll update the script to match.
+       =========================================================== -->
+  <gazebo reference="led_strip_link">
+    <light name="led_light" type="point">
+      <pose>0 0 0 0 0 0</pose>
+      <diffuse>0.6 0.6 0.6 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <attenuation>
+        <range>1.5</range>
+        <constant>0.2</constant>
+        <linear>0.5</linear>
+        <quadratic>0.01</quadratic>
+      </attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+  </gazebo>
+
+    <!-- ===========================================================
+       ROS2_CONTROL - hardware interface exposed to controller_manager.
+       Only the REAR wheel joints are listed here - this is what
+       makes them "driven" and the front pair passive. Joint names
+       MUST exactly match the <joint> names in
+       amr_description.urdf.xacro.
+       =========================================================== -->
+  <ros2_control name="amr_hardware" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="rear_left_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="rear_right_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system"
+            name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find amr_description)/config/amr_controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <!-- ===========================================================
+       FALLBACK (commented out): if gz_ros2_control isn't installed
+       and you just want the rear wheels driving from /cmd_vel
+       directly without ros2_control in the loop, delete the
+       <ros2_control> and <gazebo><plugin gz_ros2_control...> blocks
+       above and uncomment this instead. Note it still only takes
+       the REAR joints - front wheels stay unmentioned/passive here too.
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>rear_left_wheel_joint</left_joint>
+      <right_joint>rear_right_wheel_joint</right_joint>
+      <wheel_separation>0.38</wheel_separation>
+      <wheel_radius>0.05</wheel_radius>
+      <topic>cmd_vel</topic>
+      <odom_publish_frequency>30</odom_publish_frequency>
+    </plugin>
+  </gazebo>
+  =========================================================== -->
+
+</robot>
