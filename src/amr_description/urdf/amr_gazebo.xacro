@@ -8,15 +8,22 @@
   amr_description.urdf.xacro, so every <gazebo reference="..."> below
   points at a link that already exists.
 
-  WHEEL NOTE: only rear_left_wheel_joint / rear_right_wheel_joint appear
-  under <ros2_control> further down. front_left/front_right are plain
-  continuous joints with NO entry here - controller_manager never sends
-  them commands, so they just spin freely from contact with the ground,
-  same as amr_description.urdf.xacro built them. One real trade-off worth
-  knowing: because these front wheels are fixed-axis (not a swiveling
-  caster), they'll scrub sideways a little during sharp turns instead of
-  pivoting freely - fine for a warehouse-speed AMR, just not physically
-  identical to a real shopping-cart caster.
+  WHEEL NOTE: the <ros2_control> block further down lists ALL FOUR
+  wheel joints, but with different roles:
+    - rear_left / rear_right  : command_interface (velocity) + state
+                                interfaces -> DRIVEN by diff_drive_controller
+    - front_left / front_right: state interfaces ONLY, no command
+                                interface -> PASSIVE, nothing ever commands
+                                them, they just roll from ground contact
+  Why the front pair must still be listed: joint_state_broadcaster can only
+  publish joints that the hardware exposes STATE interfaces for. If a joint
+  isn't listed here, it never reaches /joint_states, robot_state_publisher
+  never gets a value for it, and its TF frame simply doesn't exist at
+  runtime (RViz then shows TF errors for that wheel).
+
+  Trade-off worth knowing: the front wheels are fixed-axis (not swiveling
+  casters), so they'll scrub sideways a little during sharp turns - fine
+  for a warehouse-speed AMR, not identical to a real shopping-cart caster.
 
   Requires (ROS2 Jazzy + Gazebo Harmonic):
     sudo apt install ros-jazzy-ros-gz ros-jazzy-gz-ros2-control \
@@ -134,26 +141,27 @@
   <xacro:ultrasonic_sensor name="ultrasonic_front_center"/>
   <xacro:ultrasonic_sensor name="ultrasonic_front_right"/>
 
-    <!-- ===========================================================
+  <!-- ===========================================================
        LED STATUS LIGHT
        A single point light attached to led_strip_link. Its colour
        is changed at runtime by scripts/led_state_controller.py,
        which calls Gazebo's built-in `/world/<world_name>/
-       light_config` service - no custom C++ plugin needed. Starts
-       "off" (dim grey/white).
+       light_config` service - no custom C++ plugin needed.
 
-       VERIFY WHEN YOU GET TO THE RUN STEP: because this light is
-       attached to a link rather than declared directly under
-       <world>, model-attached light naming has differed slightly
-       across gz-sim releases. If colours never change once we
-       write the controller script: open Gazebo's View > Lights
-       panel while the sim is running and check the exact
-       registered name - it should be "led_light"; if it's
-       something else, we'll update the script to match.
+       A point light radiates equally in all directions, so it only
+       tints nearby surfaces (e.g. the floor); it does NOT make the
+       strip box itself glow. The <visual> block below gives the
+       box a static emissive material so the housing looks lit. Its
+       colour does NOT change with state - only the light's does.
+
+       VERIFY WHEN TESTING THE LED SCRIPT: model-attached light
+       naming has differed across gz-sim releases. If colours never
+       change, open Gazebo's View > Lights panel and check the exact
+       registered name - it should be "led_light".
        =========================================================== -->
   <gazebo reference="led_strip_link">
     <light name="led_light" type="point">
-      <pose>0 0 0 0 0 0</pose>
+      <pose>0 0 0.015 0 0 0</pose>
       <diffuse>0.6 0.6 0.6 1</diffuse>
       <specular>0.3 0.3 0.3 1</specular>
       <attenuation>
@@ -164,19 +172,32 @@
       </attenuation>
       <cast_shadows>false</cast_shadows>
     </light>
+    <visual name="led_strip_link_visual">
+      <material>
+        <ambient>0.6 0.6 0.6 1</ambient>
+        <diffuse>0.6 0.6 0.6 1</diffuse>
+        <specular>0.1 0.1 0.1 1</specular>
+        <emissive>0.6 0.6 0.6 1</emissive>
+      </material>
+    </visual>
   </gazebo>
 
-    <!-- ===========================================================
+  <!-- ===========================================================
        ROS2_CONTROL - hardware interface exposed to controller_manager.
-       Only the REAR wheel joints are listed here - this is what
-       makes them "driven" and the front pair passive. Joint names
-       MUST exactly match the <joint> names in
+       Joint names MUST exactly match the <joint> names in
        amr_description.urdf.xacro.
+
+       REAR pair  : velocity command + state  -> driven.
+       FRONT pair : state ONLY (no command_interface) -> passive, but
+                    their position/velocity still reach /joint_states
+                    via joint_state_broadcaster, so TF for them exists.
        =========================================================== -->
   <ros2_control name="amr_hardware" type="system">
     <hardware>
       <plugin>gz_ros2_control/GazeboSimSystem</plugin>
     </hardware>
+
+    <!-- DRIVEN: rear wheels -->
     <joint name="rear_left_wheel_joint">
       <command_interface name="velocity"/>
       <state_interface name="velocity"/>
@@ -184,6 +205,16 @@
     </joint>
     <joint name="rear_right_wheel_joint">
       <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+
+    <!-- PASSIVE: front wheels - state interfaces only, NO command_interface -->
+    <joint name="front_left_wheel_joint">
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="front_right_wheel_joint">
       <state_interface name="velocity"/>
       <state_interface name="position"/>
     </joint>
@@ -201,14 +232,15 @@
        and you just want the rear wheels driving from /cmd_vel
        directly without ros2_control in the loop, delete the
        <ros2_control> and <gazebo><plugin gz_ros2_control...> blocks
-       above and uncomment this instead. Note it still only takes
-       the REAR joints - front wheels stay unmentioned/passive here too.
+       above and uncomment this instead. Values match the CURRENT
+       geometry (wheel_separation 0.358, wheel_radius 0.08) - update
+       them if you retune the wheels again.
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <left_joint>rear_left_wheel_joint</left_joint>
       <right_joint>rear_right_wheel_joint</right_joint>
-      <wheel_separation>0.38</wheel_separation>
-      <wheel_radius>0.05</wheel_radius>
+      <wheel_separation>0.358</wheel_separation>
+      <wheel_radius>0.08</wheel_radius>
       <topic>cmd_vel</topic>
       <odom_publish_frequency>30</odom_publish_frequency>
     </plugin>

@@ -1,0 +1,402 @@
+<?xml version="1.0" ?>
+<!--
+  warehouse.sdf
+  =============
+  16m x 12m indoor warehouse for the 6-robot AMR fleet. Sized around the
+  amr_description robot's ACTUAL footprint (computed from the finalized
+  xacro properties, not guessed):
+    overall footprint (wheel-to-wheel): 0.46m (L) x 0.39m (W)
+    chassis roof height: 0.19m, lidar top: 0.23m
+
+  LAYOUT:
+    - x from -8 to 8 (16m), y from -6 to 6 (12m)
+    - West charging strip: x = -8 to -6 (2m band), 6 marked bays along
+      the wall, spaced 2m apart (bay footprint 0.6 x 0.5m - generous
+      margin around the robot's 0.46 x 0.39m real footprint)
+    - Centre aisle: y = -1.5 to 1.5 (3m wide) - sized for TWO robots to
+      pass each other comfortably (robot width 0.39m -> want several
+      multiples of that for safe two-way traffic + sensor margin)
+    - 4 shelf rows (2 north, 2 south of centre aisle), 4 units each,
+      3.5m spacing between units (2.3m clear gap - a real cross-aisle,
+      not just a squeeze-through gap) so cross-traffic between rows
+      works, not just travel along the main aisle
+    - Back aisles (between the two rows on each side, and against the
+      north/south walls) are 1.5m - single-file comfortable, not
+      designed for two-way passing since these are secondary routes
+
+  Three world-level plugins that matter for the robot:
+    - gz-sim-user-commands-system : required for the LED light_config
+      service the Python controller script calls
+    - gz-sim-sensors-system       : required for lidar/camera rendering
+    - gz-sim-imu-system           : required for the IMU sensor to publish
+-->
+<sdf version="1.9">
+  <world name="warehouse">
+
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>20 16</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>20 16</size></plane></geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ===================================================================
+         PERIMETER WALLS - 16m x 12m floor, walls 3m tall, 0.15m thick
+         =================================================================== -->
+    <model name="wall_north">
+      <static>true</static>
+      <pose>0 6 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>16 0.15 3</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>16 0.15 3</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_south">
+      <static>true</static>
+      <pose>0 -6 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>16 0.15 3</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>16 0.15 3</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_east">
+      <static>true</static>
+      <pose>8 0 1.5 0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>12 0.15 3</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>12 0.15 3</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_west">
+      <static>true</static>
+      <pose>-8 0 1.5 0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>12 0.15 3</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>12 0.15 3</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ===================================================================
+         CHARGING BAYS (x6) - along the west wall. Purely visual floor
+         markers (no collision) so they never interfere with driving or
+         spawning - a real "dock detected" behavior would come later from
+         a fleet-manager node checking robot pose against these
+         coordinates, not from physical contact with the marker itself.
+         =================================================================== -->
+    <model name="charging_bay_1">
+      <static>true</static>
+      <pose>-7.0 -5 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.6 0.5 0.01</size></box></geometry>
+          <material><ambient>0.1 0.7 0.3 1</ambient><diffuse>0.1 0.8 0.3 1</diffuse><emissive>0.02 0.15 0.05 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="charging_bay_2">
+      <static>true</static>
+      <pose>-7.0 -3 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.6 0.5 0.01</size></box></geometry>
+          <material><ambient>0.1 0.7 0.3 1</ambient><diffuse>0.1 0.8 0.3 1</diffuse><emissive>0.02 0.15 0.05 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="charging_bay_3">
+      <static>true</static>
+      <pose>-7.0 -1 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.6 0.5 0.01</size></box></geometry>
+          <material><ambient>0.1 0.7 0.3 1</ambient><diffuse>0.1 0.8 0.3 1</diffuse><emissive>0.02 0.15 0.05 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="charging_bay_4">
+      <static>true</static>
+      <pose>-7.0 1 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.6 0.5 0.01</size></box></geometry>
+          <material><ambient>0.1 0.7 0.3 1</ambient><diffuse>0.1 0.8 0.3 1</diffuse><emissive>0.02 0.15 0.05 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="charging_bay_5">
+      <static>true</static>
+      <pose>-7.0 3 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.6 0.5 0.01</size></box></geometry>
+          <material><ambient>0.1 0.7 0.3 1</ambient><diffuse>0.1 0.8 0.3 1</diffuse><emissive>0.02 0.15 0.05 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="charging_bay_6">
+      <static>true</static>
+      <pose>-7.0 5 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.6 0.5 0.01</size></box></geometry>
+          <material><ambient>0.1 0.7 0.3 1</ambient><diffuse>0.1 0.8 0.3 1</diffuse><emissive>0.02 0.15 0.05 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ===================================================================
+         SHELF ROWS (x16) - 4 units each in 4 rows (2 north / 2 south of
+         the centre aisle). 3.5m spacing between units leaves a genuine
+         2.3m cross-aisle gap for a robot to turn from the main aisle
+         into a back aisle, not just squeeze past.
+         =================================================================== -->
+    <model name="shelf_north_1_1">
+      <static>true</static>
+      <pose>-4.0 1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_1_2">
+      <static>true</static>
+      <pose>-0.5 1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_1_3">
+      <static>true</static>
+      <pose>3.0 1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_1_4">
+      <static>true</static>
+      <pose>6.5 1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_2_1">
+      <static>true</static>
+      <pose>-4.0 3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_2_2">
+      <static>true</static>
+      <pose>-0.5 3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_2_3">
+      <static>true</static>
+      <pose>3.0 3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_north_2_4">
+      <static>true</static>
+      <pose>6.5 3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_1_1">
+      <static>true</static>
+      <pose>-4.0 -1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_1_2">
+      <static>true</static>
+      <pose>-0.5 -1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_1_3">
+      <static>true</static>
+      <pose>3.0 -1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_1_4">
+      <static>true</static>
+      <pose>6.5 -1.8 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_2_1">
+      <static>true</static>
+      <pose>-4.0 -3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_2_2">
+      <static>true</static>
+      <pose>-0.5 -3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_2_3">
+      <static>true</static>
+      <pose>3.0 -3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="shelf_south_2_4">
+      <static>true</static>
+      <pose>6.5 -3.9 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 1.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 1.8</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
