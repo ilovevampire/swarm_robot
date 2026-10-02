@@ -154,10 +154,10 @@
        box a static emissive material so the housing looks lit. Its
        colour does NOT change with state - only the light's does.
 
-       VERIFY WHEN TESTING THE LED SCRIPT: model-attached light
-       naming has differed across gz-sim releases. If colours never
-       change, open Gazebo's View > Lights panel and check the exact
-       registered name - it should be "led_light".
+              CONFIRMED (tested): Gazebo renames this light at runtime to
+       "amr::base_footprint::led_light" - the plain "led_light" name
+       below only exists in this SDF source file, not in the live
+       scene. See led_state_controller.py's default light_name param.
        =========================================================== -->
   <gazebo reference="led_strip_link">
     <light name="led_light" type="point">
